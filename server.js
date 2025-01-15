@@ -29,8 +29,16 @@ function generateRoomCode() {
     return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
 
+// Message structure: { id: string, text: string, timestamp: number }
+function createMessage(text) {
+    return {
+        id: Math.random().toString(36).substring(2, 15),
+        text: text,
+        timestamp: Date.now()
+    };
+}
+
 const PORT = process.env.PORT || 3000;
-const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
 
 io.on('connection', (socket) => {
     console.log('User connected');
@@ -38,18 +46,53 @@ io.on('connection', (socket) => {
     // Create new session (admin only)
     socket.on('createSession', async () => {
         const roomCode = generateRoomCode();
-        const roomUrl = `${BASE_URL}?room=${roomCode}`;
-        const qrCode = await QRCode.toDataURL(roomUrl);
         
         sessions.set(roomCode, {
             ratings: [],
             pageTitle: 'Rating Session',
             isVotingActive: true,
+            isMessageBoardActive: false,
+            messages: [],
             adminSocket: socket.id
         });
         
         socket.join(roomCode);
-        socket.emit('sessionCreated', { roomCode, qrCode });
+        socket.emit('sessionCreated', { roomCode });
+    });
+
+    // Message board controls (admin only)
+    socket.on('toggleMessageBoard', ({ roomCode, enabled }) => {
+        const session = sessions.get(roomCode);
+        if (session && session.adminSocket === socket.id) {
+            session.isMessageBoardActive = enabled;
+            io.to(roomCode).emit('messageBoardStatus', enabled);
+        }
+    });
+
+    socket.on('clearMessages', (roomCode) => {
+        const session = sessions.get(roomCode);
+        if (session && session.adminSocket === socket.id) {
+            session.messages = [];
+            io.to(roomCode).emit('messagesUpdated', []);
+        }
+    });
+
+    socket.on('deleteMessage', ({ roomCode, messageId }) => {
+        const session = sessions.get(roomCode);
+        if (session && session.adminSocket === socket.id) {
+            session.messages = session.messages.filter(m => m.id !== messageId);
+            io.to(roomCode).emit('messagesUpdated', session.messages);
+        }
+    });
+
+    // Handle new messages from users
+    socket.on('sendMessage', ({ roomCode, text }) => {
+        const session = sessions.get(roomCode);
+        if (session && session.isMessageBoardActive) {
+            const message = createMessage(text);
+            session.messages.push(message);
+            io.to(roomCode).emit('messagesUpdated', session.messages);
+        }
     });
 
     // Join existing session (users)
@@ -62,7 +105,9 @@ io.on('connection', (socket) => {
                 pageTitle: session.pageTitle,
                 ratings: session.ratings,
                 average: calculateAverage(session.ratings),
-                totalVotes: session.ratings.length
+                totalVotes: session.ratings.length,
+                isMessageBoardActive: session.isMessageBoardActive,
+                messages: session.messages
             });
             // Update connected users count for admin
             io.to(roomCode).emit('updateConnections', 
@@ -150,6 +195,30 @@ io.on('connection', (socket) => {
                 if (session.adminSocket === socket.id) {
                     io.to(socket.roomCode).emit('sessionEnded');
                     sessions.delete(socket.roomCode);
+                }
+            }
+        }
+    });
+
+    socket.on('leaveRoom', (roomCode) => {
+        if (roomCode) {
+            socket.leave(roomCode);
+            const session = sessions.get(roomCode);
+            if (session) {
+                // Remove user's vote if they leave
+                session.ratings = session.ratings.filter(r => r.socketId !== socket.id);
+                
+                // Update remaining clients
+                io.to(roomCode).emit('updateVotes', {
+                    ratings: session.ratings,
+                    average: calculateAverage(session.ratings),
+                    totalVotes: session.ratings.length
+                });
+
+                // Update connected users count
+                const room = io.sockets.adapter.rooms.get(roomCode);
+                if (room) {
+                    io.to(roomCode).emit('updateConnections', room.size);
                 }
             }
         }

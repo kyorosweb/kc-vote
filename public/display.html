@@ -15,6 +15,11 @@
         .average {
             font-size: 48px;
             margin: 20px;
+            font-family: monospace;
+            transition: color 0.3s;
+        }
+        .average.updating {
+            color: #4CAF50;
         }
         .room-info {
             margin: 10px;
@@ -38,9 +43,57 @@
             font-size: 0.8em;
             margin: 5px 0;
         }
+        .status-message {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            padding: 10px;
+            background: #ff4444;
+            color: white;
+            text-align: center;
+            display: none;
+            z-index: 1000;
+        }
+        .leave-room {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 10px 20px;
+            background: #ff4444;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        .leave-room:hover {
+            background: #cc3333;
+        }
+        .messages-display {
+            margin: 20px;
+            width: 80%;
+            max-width: 600px;
+        }
+        .messages-list {
+            max-height: 300px;
+            overflow-y: auto;
+            background: #f0f0f0;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .message-item {
+            background: white;
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 3px;
+            font-size: 18px;
+        }
     </style>
 </head>
 <body>
+    <div id="statusMessage" class="status-message"></div>
+
     <div id="joinSession">
         <h2>Join Display Session</h2>
         <input type="text" id="roomCodeInput" placeholder="Enter room code">
@@ -59,6 +112,11 @@
             <p class="qr-title">Scan to join:</p>
             <img id="qrCode" alt="QR Code">
         </div>
+        <button class="leave-room" onclick="leaveRoom()">Leave Room</button>
+        <div class="messages-display">
+            <h2>Messages</h2>
+            <div class="messages-list" id="messagesList"></div>
+        </div>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
@@ -66,6 +124,17 @@
         const socket = io();
         let currentRoomCode = null;
         
+        function showStatus(message, isError = true) {
+            const statusDiv = document.getElementById('statusMessage');
+            statusDiv.textContent = message;
+            statusDiv.style.display = 'block';
+            statusDiv.style.background = isError ? '#ff4444' : '#44aa44';
+        }
+
+        function hideStatus() {
+            document.getElementById('statusMessage').style.display = 'none';
+        }
+
         function joinSession() {
             const roomCode = document.getElementById('roomCodeInput').value.toUpperCase();
             socket.emit('joinSession', roomCode);
@@ -77,7 +146,8 @@
             document.getElementById('displayArea').style.display = 'block';
             document.getElementById('pageTitle').textContent = data.pageTitle;
             document.getElementById('currentRoom').textContent = currentRoomCode;
-            document.getElementById('average').textContent = data.average;
+            const averageElement = document.getElementById('average');
+            animateNumber(averageElement, 0, data.average);
             document.getElementById('totalVotes').textContent = data.totalVotes;
             
             // Generate QR code for the room
@@ -93,6 +163,10 @@
                 .catch(error => {
                     console.error('Error generating QR code:', error);
                 });
+
+            if (data.messages) {
+                updateMessages(data.messages);
+            }
         });
 
         socket.on('updateTitle', (title) => {
@@ -100,14 +174,106 @@
         });
 
         socket.on('updateVotes', (data) => {
-            document.getElementById('average').textContent = data.average;
+            const averageElement = document.getElementById('average');
+            const currentValue = averageElement.textContent;
+            animateNumber(averageElement, currentValue, data.average);
             document.getElementById('totalVotes').textContent = data.totalVotes;
         });
 
         socket.on('sessionEnded', () => {
-            alert('Session has ended');
+            showStatus('Session has ended. The admin has closed the session.');
             window.location.reload();
         });
+
+        socket.on('disconnect', () => {
+            showStatus('Connection lost. Trying to reconnect...');
+        });
+
+        socket.on('connect', () => {
+            hideStatus();
+        });
+
+        socket.on('connect_error', () => {
+            showStatus('Unable to connect to server');
+        });
+
+        function leaveRoom() {
+            if (confirm('Are you sure you want to leave this room?')) {
+                socket.emit('leaveRoom', currentRoomCode);
+                currentRoomCode = null;
+                document.getElementById('joinSession').style.display = 'block';
+                document.getElementById('displayArea').style.display = 'none';
+                document.getElementById('roomCodeInput').value = '';
+            }
+        }
+
+        socket.on('messageBoardStatus', (enabled) => {
+            document.getElementById('messageBoard').style.display = enabled ? 'block' : 'none';
+        });
+
+        socket.on('messagesUpdated', updateMessages);
+
+        function updateMessages(messages) {
+            const messagesList = document.getElementById('messagesList');
+            messagesList.innerHTML = [...messages].reverse().map(msg => `
+                <div class="message-item">
+                    <span>${msg.text}</span>
+                </div>
+            `).join('');
+            messagesList.scrollTop = 0;
+        }
+
+        function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const text = input.value.trim();
+            if (text) {
+                socket.emit('sendMessage', {
+                    roomCode: currentRoomCode,
+                    text: text
+                });
+                input.value = '';
+            }
+        }
+
+        // Add enter key support for message input
+        document.getElementById('messageInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+        function animateNumber(element, start, end, duration = 1000) {
+            const startTime = performance.now();
+            const startNumber = parseFloat(start) || 0;
+            const endNumber = parseFloat(end) || 0;
+            
+            // Add updating class for color change
+            element.classList.add('updating');
+            
+            function update(currentTime) {
+                const elapsed = currentTime - startTime;
+                const progress = Math.min(elapsed / duration, 1);
+                
+                // Easing function for smooth animation
+                const easeOutQuart = 1 - Math.pow(1 - progress, 4);
+                
+                const current = startNumber + (endNumber - startNumber) * easeOutQuart;
+                element.textContent = current.toFixed(2);
+                
+                if (progress < 1) {
+                    requestAnimationFrame(update);
+                } else {
+                    // Ensure we end up with the exact target number
+                    element.textContent = endNumber.toFixed(2);
+                    // Remove updating class after animation
+                    setTimeout(() => {
+                        element.classList.remove('updating');
+                    }, 300);
+                }
+            }
+            
+            requestAnimationFrame(update);
+        }
 
         // ... rest of the existing socket listeners ...
     </script>

@@ -29,6 +29,31 @@
             max-width: 200px;
             margin: 10px 0;
         }
+        .message-board-controls {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+        }
+        .messages-list {
+            margin: 10px 0;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .message-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 5px;
+            margin: 5px 0;
+            background: white;
+            border-radius: 3px;
+        }
+        .delete-message {
+            color: red;
+            cursor: pointer;
+            padding: 0 5px;
+        }
     </style>
 </head>
 <body>
@@ -65,6 +90,18 @@
             <h3>Individual Votes:</h3>
             <div id="votesList"></div>
         </div>
+
+        <div class="message-board-controls">
+            <h3>Message Board Controls</h3>
+            <div>
+                <label>
+                    <input type="checkbox" id="messageBoardToggle" onchange="toggleMessageBoard(this.checked)">
+                    Enable Message Board
+                </label>
+                <button onclick="clearMessages()">Clear All Messages</button>
+            </div>
+            <div class="messages-list" id="messagesList"></div>
+        </div>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
@@ -78,11 +115,25 @@
         }
 
         socket.on('sessionCreated', (data) => {
-            const { roomCode, qrCode } = data;
+            const { roomCode } = data;
             currentRoomCode = roomCode;
             document.getElementById('sessionInfo').style.display = 'block';
             document.getElementById('roomCode').textContent = roomCode;
-            document.getElementById('qrCode').src = qrCode;
+            
+            // Generate QR code with current domain
+            const roomUrl = new URL(window.location.origin);
+            roomUrl.pathname = '/';
+            roomUrl.searchParams.set('room', roomCode);
+            
+            fetch(`/qr?url=${encodeURIComponent(roomUrl.toString())}`)
+                .then(response => response.text())
+                .then(qrCode => {
+                    document.getElementById('qrCode').src = qrCode;
+                })
+                .catch(error => {
+                    console.error('Error generating QR code:', error);
+                });
+            
             document.querySelector('.container').style.display = 'block';
         });
 
@@ -115,6 +166,37 @@
         socket.on('sessionEnded', () => {
             alert('Session ended');
             window.location.reload();
+        });
+
+        function toggleMessageBoard(enabled) {
+            socket.emit('toggleMessageBoard', {
+                roomCode: currentRoomCode,
+                enabled: enabled
+            });
+        }
+
+        function clearMessages() {
+            if (confirm('Are you sure you want to clear all messages?')) {
+                socket.emit('clearMessages', currentRoomCode);
+            }
+        }
+
+        function deleteMessage(messageId) {
+            socket.emit('deleteMessage', {
+                roomCode: currentRoomCode,
+                messageId: messageId
+            });
+        }
+
+        socket.on('messagesUpdated', (messages) => {
+            const messagesList = document.getElementById('messagesList');
+            messagesList.innerHTML = [...messages].reverse().map(msg => `
+                <div class="message-item">
+                    <span>${msg.text}</span>
+                    <span class="delete-message" onclick="deleteMessage('${msg.id}')">&times;</span>
+                </div>
+            `).join('');
+            messagesList.scrollTop = 0;
         });
     </script>
 </body>
