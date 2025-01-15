@@ -2,21 +2,35 @@
 <html>
 <head>
     <title>KC Vote - Display Board</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <style>
         body {
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            height: 100vh;
+            min-height: 100vh;
             margin: 0;
             font-size: 24px;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        #displayArea {
+            width: 100%;
+            max-width: 800px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
         }
         .average {
             font-size: 48px;
             margin: 20px;
             font-family: monospace;
             transition: color 0.3s;
+            text-align: center;
         }
         .average.updating {
             color: #4CAF50;
@@ -34,9 +48,14 @@
             padding: 15px;
             background: #f0f0f0;
             border-radius: 5px;
+            width: 100%;
+            max-width: 300px;
+            box-sizing: border-box;
         }
         #qrCode {
+            width: 100%;
             max-width: 200px;
+            height: auto;
             margin: 10px 0;
         }
         .qr-title {
@@ -72,8 +91,9 @@
         }
         .messages-display {
             margin: 20px;
-            width: 80%;
+            width: 100%;
             max-width: 600px;
+            box-sizing: border-box;
         }
         .messages-list {
             max-height: 300px;
@@ -88,6 +108,33 @@
             margin: 5px 0;
             border-radius: 3px;
             font-size: 18px;
+        }
+        #joinSession {
+            width: 100%;
+            max-width: 400px;
+            text-align: center;
+            margin: 20px;
+        }
+        #joinSession input {
+            width: 100%;
+            max-width: 200px;
+            padding: 10px;
+            margin: 10px 0;
+            font-size: 18px;
+        }
+        #joinSession button {
+            padding: 10px 20px;
+            font-size: 18px;
+            margin: 10px;
+        }
+        @supports (-webkit-touch-callout: none) {
+            /* iOS-specific fixes */
+            body {
+                min-height: -webkit-fill-available;
+            }
+            .messages-display {
+                margin-bottom: 80px; /* Extra space for iOS bottom bar */
+            }
         }
     </style>
 </head>
