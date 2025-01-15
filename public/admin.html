@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>KC Vote - Admin Panel</title>
+    <style>
+        .container {
+            margin: 20px;
+            display: none;
+        }
+        .stats {
+            margin: 20px 0;
+        }
+        #sessionInfo {
+            margin: 20px;
+            padding: 15px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+        }
+        #createSessionBtn {
+            margin: 20px;
+            padding: 10px 20px;
+            font-size: 16px;
+        }
+        #qrContainer {
+            margin: 20px 0;
+            text-align: center;
+        }
+        #qrCode {
+            max-width: 200px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <button id="createSessionBtn" onclick="createSession()">Create New Session</button>
+
+    <div id="sessionInfo" style="display: none">
+        <h2>Session Code: <span id="roomCode"></span></h2>
+        <p>Share this code with participants to join the session</p>
+        <div id="qrContainer">
+            <img id="qrCode" alt="QR Code">
+            <p>Scan QR code to join</p>
+        </div>
+    </div>
+
+    <div class="container">
+        <h1>Admin Panel</h1>
+        
+        <div>
+            <label>Page Title:</label>
+            <input type="text" id="titleInput" oninput="updateTitle(this.value)" placeholder="Enter title">
+        </div>
+
+        <div>
+            <button onclick="startNewVoting()">Start New Voting Session</button>
+        </div>
+
+        <div class="stats">
+            <p>Connected Users: <span id="connections">0</span></p>
+            <p>Total Votes: <span id="totalVotes">0</span></p>
+            <p>Average Rating: <span id="average">0</span></p>
+        </div>
+
+        <div>
+            <h3>Individual Votes:</h3>
+            <div id="votesList"></div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        let currentRoomCode = null;
+
+        function createSession() {
+            socket.emit('createSession');
+            document.getElementById('createSessionBtn').style.display = 'none';
+        }
+
+        socket.on('sessionCreated', (data) => {
+            const { roomCode, qrCode } = data;
+            currentRoomCode = roomCode;
+            document.getElementById('sessionInfo').style.display = 'block';
+            document.getElementById('roomCode').textContent = roomCode;
+            document.getElementById('qrCode').src = qrCode;
+            document.querySelector('.container').style.display = 'block';
+        });
+
+        socket.on('updateConnections', (count) => {
+            document.getElementById('connections').textContent = count;
+        });
+
+        socket.on('updateVotes', (data) => {
+            document.getElementById('totalVotes').textContent = data.totalVotes;
+            document.getElementById('average').textContent = data.average;
+            
+            const votesList = document.getElementById('votesList');
+            votesList.innerHTML = '';
+            data.ratings.forEach((vote, index) => {
+                votesList.innerHTML += `<div>User ${index + 1}: ${vote.rating}</div>`;
+            });
+        });
+
+        function updateTitle(newTitle) {
+            socket.emit('updateTitle', {
+                roomCode: currentRoomCode,
+                newTitle: newTitle
+            });
+        }
+
+        function startNewVoting() {
+            socket.emit('startNewVoting', currentRoomCode);
+        }
+
+        socket.on('sessionEnded', () => {
+            alert('Session ended');
+            window.location.reload();
+        });
+    </script>
+</body>
+</html> 

@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>KC Vote - Display Board</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            font-size: 24px;
+        }
+        .average {
+            font-size: 48px;
+            margin: 20px;
+        }
+        .room-info {
+            margin: 10px;
+            padding: 5px;
+            background: #f0f0f0;
+            border-radius: 5px;
+            font-size: 0.8em;
+        }
+        #qrContainer {
+            margin: 20px;
+            text-align: center;
+            padding: 15px;
+            background: #f0f0f0;
+            border-radius: 5px;
+        }
+        #qrCode {
+            max-width: 200px;
+            margin: 10px 0;
+        }
+        .qr-title {
+            font-size: 0.8em;
+            margin: 5px 0;
+        }
+    </style>
+</head>
+<body>
+    <div id="joinSession">
+        <h2>Join Display Session</h2>
+        <input type="text" id="roomCodeInput" placeholder="Enter room code">
+        <button onclick="joinSession()">Join</button>
+    </div>
+
+    <div id="displayArea" style="display: none">
+        <h1 id="pageTitle">Rating Session</h1>
+        <div class="room-info">
+            <p>Room Code: <span id="currentRoom"></span></p>
+        </div>
+        <div>Average Rating:</div>
+        <div class="average" id="average">0</div>
+        <div>Total Votes: <span id="totalVotes">0</span></div>
+        <div id="qrContainer">
+            <p class="qr-title">Scan to join:</p>
+            <img id="qrCode" alt="QR Code">
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        let currentRoomCode = null;
+        
+        function joinSession() {
+            const roomCode = document.getElementById('roomCodeInput').value.toUpperCase();
+            socket.emit('joinSession', roomCode);
+        }
+
+        socket.on('joinedSession', (data) => {
+            currentRoomCode = document.getElementById('roomCodeInput').value.toUpperCase();
+            document.getElementById('joinSession').style.display = 'none';
+            document.getElementById('displayArea').style.display = 'block';
+            document.getElementById('pageTitle').textContent = data.pageTitle;
+            document.getElementById('currentRoom').textContent = currentRoomCode;
+            document.getElementById('average').textContent = data.average;
+            document.getElementById('totalVotes').textContent = data.totalVotes;
+            
+            // Generate QR code for the room
+            const roomUrl = new URL(window.location.origin);
+            roomUrl.pathname = '/';
+            roomUrl.searchParams.set('room', currentRoomCode);
+            
+            fetch(`/qr?url=${encodeURIComponent(roomUrl.toString())}`)
+                .then(response => response.text())
+                .then(qrCode => {
+                    document.getElementById('qrCode').src = qrCode;
+                })
+                .catch(error => {
+                    console.error('Error generating QR code:', error);
+                });
+        });
+
+        socket.on('updateTitle', (title) => {
+            document.getElementById('pageTitle').textContent = title;
+        });
+
+        socket.on('updateVotes', (data) => {
+            document.getElementById('average').textContent = data.average;
+            document.getElementById('totalVotes').textContent = data.totalVotes;
+        });
+
+        socket.on('sessionEnded', () => {
+            alert('Session has ended');
+            window.location.reload();
+        });
+
+        // ... rest of the existing socket listeners ...
+    </script>
+</body>
+</html> 

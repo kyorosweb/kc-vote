@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>KC Vote</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta http-equiv="Permissions-Policy" content="camera=(), microphone=()">
+    <style>
+        .rating-btn {
+            padding: 10px 20px;
+            margin: 5px;
+            font-size: 18px;
+        }
+        .disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        #message {
+            margin: 20px;
+            font-size: 18px;
+        }
+        .stats {
+            margin: 20px;
+            font-size: 18px;
+        }
+        #average, #totalVotes {
+            font-weight: bold;
+        }
+        .room-info {
+            margin: 10px;
+            padding: 5px;
+            background: #f0f0f0;
+            border-radius: 5px;
+        }
+        #qrScanner {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.9);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: white;
+        }
+        #qrScanner h2 {
+            position: fixed;
+            top: 20px;
+            z-index: 2000;
+            margin: 0;
+        }
+        #qrScanner .close-btn {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 2000;
+            padding: 10px 20px;
+            font-size: 16px;
+            background: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        #reader {
+            width: 100vw;
+            height: 100vh;
+            background: white;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1000;
+        }
+        #reader__scan_region {
+            background: transparent !important;
+        }
+        #reader__dashboard {
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+            background: rgba(0, 0, 0, 0.8) !important;
+            padding: 10px;
+        }
+        #reader__camera_selection {
+            background: white;
+            padding: 5px;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div id="joinSession">
+        <h2>Join Session</h2>
+        <input type="text" id="roomCodeInput" placeholder="Enter room code">
+        <button onclick="joinSession()">Join</button>
+        <button onclick="toggleScanner()">Scan QR Code</button>
+    </div>
+
+    <div id="votingArea" style="display: none">
+        <h1 id="pageTitle">Rating Session</h1>
+        <div class="room-info">
+            <p>Room Code: <span id="currentRoom"></span></p>
+        </div>
+        <div class="stats">
+            <p>Average Rating: <span id="average">0</span></p>
+            <p>Total Votes: <span id="totalVotes">0</span></p>
+        </div>
+        <div id="ratingButtons">
+            <button class="rating-btn" onclick="submitVote(1)">1</button>
+            <button class="rating-btn" onclick="submitVote(2)">2</button>
+            <button class="rating-btn" onclick="submitVote(3)">3</button>
+            <button class="rating-btn" onclick="submitVote(4)">4</button>
+            <button class="rating-btn" onclick="submitVote(5)">5</button>
+        </div>
+        <div id="message"></div>
+    </div>
+
+    <div id="qrScanner" style="display: none">
+        <h2>Scan QR Code</h2>
+        <div id="reader"></div>
+        <button class="close-btn" onclick="toggleScanner()">Close Scanner</button>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://unpkg.com/html5-qrcode@2.3.8"></script>
+    <script>
+        const socket = io();
+        let hasVoted = false;
+        let currentRoomCode = null;
+        let scanner = null;
+        let cameraId = null;
+
+        // Helper function to detect iOS
+        function isIOS() {
+            return [
+                'iPad Simulator',
+                'iPhone Simulator',
+                'iPod Simulator',
+                'iPad',
+                'iPhone',
+                'iPod'
+            ].includes(navigator.platform)
+            || (navigator.userAgent.includes("Mac") && "ontouchend" in document);
+        }
+
+        // Check URL for room parameter
+        window.addEventListener('load', () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const roomCode = urlParams.get('room');
+            if (roomCode) {
+                document.getElementById('roomCodeInput').value = roomCode;
+                joinSession();
+            }
+        });
+
+        function toggleScanner() {
+            const scannerDiv = document.getElementById('qrScanner');
+            if (scannerDiv.style.display === 'none') {
+                scannerDiv.style.display = 'flex';
+                // First request camera permission explicitly
+                navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        facingMode: { ideal: 'environment' } 
+                    } 
+                })
+                .then(stream => {
+                    stream.getTracks().forEach(track => track.stop()); // Stop the stream immediately
+                    startScanner();
+                })
+                .catch(err => {
+                    console.error('Camera permission error:', err);
+                    alert('Please allow camera access to scan QR codes. If denied, please reset permissions in your browser settings.');
+                    scannerDiv.style.display = 'none';
+                });
+            } else {
+                scannerDiv.style.display = 'none';
+                if (scanner) {
+                    try {
+                        scanner.stop();
+                    } catch (err) {
+                        console.error('Scanner cleanup error:', err);
+                    }
+                }
+            }
+        }
+
+        function startScanner() {
+            scanner = new Html5Qrcode("reader");
+            Html5Qrcode.getCameras().then(devices => {
+                if (devices && devices.length) {
+                    // Prefer back camera
+                    cameraId = devices.find(d => d.label.toLowerCase().includes('back'))?.id || devices[0].id;
+                    
+                    const config = {
+                        fps: 10,
+                        qrbox: { width: 250, height: 250 },
+                        aspectRatio: window.innerWidth / window.innerHeight,
+                        showTorchButtonIfSupported: false, // Disable torch on iOS as it can cause issues
+                        formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+                        rememberLastUsedCamera: false,
+                        useBarCodeDetectorIfSupported: true
+                    };
+
+                    scanner.start(
+                        cameraId,
+                        config,
+                        onScanSuccess,
+                        onScanError
+                    ).catch(err => {
+                        console.error('Camera access error:', err);
+                        alert('Could not access camera. Please ensure camera permissions are granted in your browser settings.');
+                        document.getElementById('qrScanner').style.display = 'none';
+                    });
+                } else {
+                    alert('No cameras found on your device');
+                    document.getElementById('qrScanner').style.display = 'none';
+                }
+            }).catch(err => {
+                console.error('Error getting cameras', err);
+                alert('Error accessing cameras. Please ensure camera permissions are granted in your browser settings.');
+                document.getElementById('qrScanner').style.display = 'none';
+            });
+        }
+
+        function onScanError(err) {
+            // Only log critical errors
+            if (!err.includes('NotFound')) {
+                console.error('Scan error:', err);
+            }
+        }
+
+        function onScanSuccess(decodedText) {
+            try {
+                const url = new URL(decodedText);
+                const roomCode = url.searchParams.get('room');
+                if (roomCode) {
+                    document.getElementById('roomCodeInput').value = roomCode;
+                    joinSession();
+                    toggleScanner();
+                }
+            } catch (e) {
+                console.error('Invalid QR code:', e);
+            }
+        }
+
+        function joinSession() {
+            const roomCode = document.getElementById('roomCodeInput').value.toUpperCase();
+            socket.emit('joinSession', roomCode);
+        }
+
+        // Function to check if user has already voted in this session
+        function hasVotedInSession(roomCode) {
+            const votedSessions = JSON.parse(localStorage.getItem('votedSessions') || '{}');
+            return votedSessions[roomCode] === true;
+        }
+
+        // Function to mark session as voted
+        function markSessionAsVoted(roomCode) {
+            const votedSessions = JSON.parse(localStorage.getItem('votedSessions') || '{}');
+            votedSessions[roomCode] = true;
+            localStorage.setItem('votedSessions', JSON.stringify(votedSessions));
+        }
+
+        // Function to clear vote for a session (used when admin starts new voting)
+        function clearSessionVote(roomCode) {
+            const votedSessions = JSON.parse(localStorage.getItem('votedSessions') || '{}');
+            delete votedSessions[roomCode];
+            localStorage.setItem('votedSessions', JSON.stringify(votedSessions));
+        }
+
+        socket.on('joinedSession', (data) => {
+            currentRoomCode = document.getElementById('roomCodeInput').value.toUpperCase();
+            document.getElementById('joinSession').style.display = 'none';
+            document.getElementById('votingArea').style.display = 'block';
+            document.getElementById('pageTitle').textContent = data.pageTitle;
+            document.getElementById('currentRoom').textContent = currentRoomCode;
+            // Check if user has already voted in this session
+            if (hasVotedInSession(currentRoomCode)) {
+                hasVoted = true;
+                document.getElementById('message').textContent = 'You have already voted in this session';
+                disableButtons();
+            } else {
+                enableButtons();
+            }
+        });
+
+        socket.on('error', (message) => {
+            alert(message);
+        });
+
+        socket.on('updateTitle', (title) => {
+            document.getElementById('pageTitle').textContent = title;
+        });
+
+        socket.on('votingStarted', () => {
+            hasVoted = false;
+            clearSessionVote(currentRoomCode);
+            document.getElementById('message').textContent = '';
+            enableButtons();
+        });
+
+        socket.on('updateVotes', (data) => {
+            document.getElementById('average').textContent = data.average;
+            document.getElementById('totalVotes').textContent = data.totalVotes;
+        });
+
+        function submitVote(rating) {
+            if (!hasVoted && !hasVotedInSession(currentRoomCode)) {
+                console.log('Submitting vote:', rating, 'for room:', currentRoomCode);
+                socket.emit('submitVote', {
+                    roomCode: currentRoomCode,
+                    rating: rating
+                });
+                hasVoted = true;
+                markSessionAsVoted(currentRoomCode);
+                document.getElementById('message').textContent = 'Vote submitted!';
+                disableButtons();
+            } else if (hasVotedInSession(currentRoomCode)) {
+                alert('You have already voted in this session. Please wait for the admin to start a new voting session.');
+            }
+        }
+
+        function disableButtons() {
+            const buttons = document.getElementsByClassName('rating-btn');
+            for (let btn of buttons) {
+                btn.classList.add('disabled');
+            }
+        }
+
+        function enableButtons() {
+            const buttons = document.getElementsByClassName('rating-btn');
+            for (let btn of buttons) {
+                btn.classList.remove('disabled');
+            }
+        }
+
+        socket.on('sessionEnded', () => {
+            // Optionally clear the vote when session ends
+            clearSessionVote(currentRoomCode);
+            alert('Session has ended');
+            window.location.reload();
+        });
+    </script>
+</body>
+</html> 
